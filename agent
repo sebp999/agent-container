@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+IMAGE="${AGENT_CODER_IMAGE:-agent-coder}"
+DOCKER="${AGENT_CODER_DOCKER:-docker}"
+WORKSPACE="/workspace"
+CONTAINER_HOME="/home/coder"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent <agent-name> [directory] [agent-args...]
+  agent --help
+
+Agents:
+  claude
+  codex
+  opencode
+
+Examples:
+  agent claude .
+  agent codex ~/src/project
+  agent opencode ../another-project
+  agent claude . --resume
+  agent codex --help
+
+Environment:
+  AGENT_CODER_IMAGE       Docker image to run. Default: agent-coder
+  AGENT_CODER_DOCKER      Docker-compatible CLI to use. Default: docker
+  AGENT_CODER_ENV         Comma or space separated host env vars to forward.
+
+Example:
+  AGENT_CODER_ENV=ANTHROPIC_API_KEY,OPENAI_API_KEY agent claude .
+EOF
+}
+
+die() {
+  printf 'agent: %s\n' "$*" >&2
+  exit 1
+}
+
+agent_command() {
+  case "$1" in
+    claude) printf 'claude' ;;
+    codex) printf 'codex' ;;
+    opencode) printf 'opencode' ;;
+    *) return 1 ;;
+  esac
+}
+
+volume_name() {
+  case "$1" in
+    claude) printf 'agent-coder-claude' ;;
+    codex) printf 'agent-coder-codex' ;;
+    opencode) printf 'agent-coder-opencode' ;;
+    *) return 1 ;;
+  esac
+}
+
+resolve_dir() {
+  local input="$1"
+
+  [[ -e "$input" ]] || die "directory does not exist: $input"
+  [[ -d "$input" ]] || die "path is not a directory: $input"
+
+  (cd "$input" && pwd -P)
+}
+
+append_forwarded_env() {
+  local raw="${AGENT_CODER_ENV:-}"
+  local normalized name
+
+  [[ -n "$raw" ]] || return 0
+
+  normalized="${raw//,/ }"
+  for name in $normalized; do
+    if [[ "${!name+x}" == x ]]; then
+      docker_args+=(--env "$name")
+    else
+      printf 'agent: warning: %s is listed in AGENT_CODER_ENV but is not set on the host\n' "$name" >&2
+    fi
+  done
+}
+
+validate_forwarded_env() {
+  local raw="${AGENT_CODER_ENV:-}"
+  local normalized name
+
+  [[ -n "$raw" ]] || return 0
+
+  normalized="${raw//,/ }"
+  for name in $normalized; do
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid environment variable name in AGENT_CODER_ENV: $name"
+  done
+}
+
+ensure_auth_volume_writable() {
+  "$DOCKER" run \
+    --rm \
+    --user root \
+    --entrypoint /bin/sh \
+    --mount "type=volume,source=${auth_volume},target=${CONTAINER_HOME}" \
+    "$IMAGE" \
+    -c 'set -eu; uid="$(id -u coder)"; gid="$(id -g coder)"; mkdir -p /home/coder; chown -R "$uid:$gid" /home/coder; chmod 700 /home/coder'
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+[[ $# -ge 1 ]] || {
+  usage >&2
+  exit 2
+}
+
+agent_name="$1"
+shift
+
+command_inside="$(agent_command "$agent_name")" || die "unknown agent: $agent_name"
+auth_volume="$(volume_name "$agent_name")" || die "unknown agent: $agent_name"
+
+if [[ $# -eq 0 ]]; then
+  source_dir="."
+elif [[ "$1" == -* ]]; then
+  source_dir="."
+else
+  source_dir="$1"
+  shift
+fi
+
+source_abs="$(resolve_dir "$source_dir")"
+validate_forwarded_env
+
+command -v "$DOCKER" >/dev/null 2>&1 || die "Docker-compatible CLI not found: $DOCKER"
+"$DOCKER" info >/dev/null 2>&1 || die "$DOCKER is unavailable; start Docker Desktop, Colima, or another compatible Docker engine"
+"$DOCKER" image inspect "$IMAGE" >/dev/null 2>&1 || die "container image does not exist: $IMAGE. Build it with: $DOCKER build -t $IMAGE ."
+ensure_auth_volume_writable || die "failed to prepare authentication volume: $auth_volume"
+
+docker_args=(
+  run
+  --rm
+  --interactive
+)
+
+if [[ -t 0 && -t 1 ]]; then
+  docker_args+=(--tty)
+fi
+
+docker_args+=(
+  --user coder
+  --cap-drop ALL
+  --security-opt no-new-privileges
+  --read-only
+  --tmpfs /tmp:rw,nosuid,nodev,exec,mode=1777
+  --mount "type=bind,source=${source_abs},target=${WORKSPACE}"
+  --mount "type=volume,source=${auth_volume},target=${CONTAINER_HOME}"
+  --workdir "$WORKSPACE"
+  --env "HOME=${CONTAINER_HOME}"
+  --env "SHELL=/bin/bash"
+  --env "TERM=${TERM:-xterm-256color}"
+  --hostname agent-coder
+)
+
+if [[ -n "${COLORTERM:-}" ]]; then
+  docker_args+=(--env "COLORTERM=${COLORTERM}")
+fi
+
+append_forwarded_env
+
+docker_args+=(
+  "$IMAGE"
+  "$command_inside"
+)
+
+exec "$DOCKER" "${docker_args[@]}" "$@"

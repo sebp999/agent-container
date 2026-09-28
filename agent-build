@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+DOCKER="${AGENT_CODER_DOCKER:-docker}"
+IMAGE="${AGENT_CODER_IMAGE:-agent-coder}"
+
+exec "$DOCKER" build \
+  --build-arg "USER_UID=$(id -u)" \
+  --build-arg "USER_GID=$(id -g)" \
+  -t "$IMAGE" \
+  .
