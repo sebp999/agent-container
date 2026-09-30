@@ -1,4 +1,10 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS node
+
+FROM python:3.14-slim-bookworm
+
+# Bring in the existing Node.js toolchain while using the official Python image
+# for Python 3.14 and pip.
+COPY --from=node /usr/local/ /usr/local/
 
 ARG USER_UID=1000
 ARG USER_GID=1000

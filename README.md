@@ -85,6 +85,18 @@ Variables listed in `AGENT_CODER_ENV` are passed with Docker's `--env NAME` form
 
 Terminal-related variables `TERM` and, when set, `COLORTERM` are forwarded explicitly so full-screen agent UIs behave normally.
 
+If a corporate proxy uses a private certificate authority, set
+`NODE_EXTRA_CA_CERTS` to the CA bundle on the host. The wrapper mounts only that
+file read-only and changes the variable to its path inside the container:
+
+```bash
+export NODE_EXTRA_CA_CERTS="$HOME/athena-crt.crt"
+./agent claude ~/src/my-project
+```
+
+Do not add `NODE_EXTRA_CA_CERTS` to `AGENT_CODER_ENV`; the wrapper handles it
+separately because the host path does not exist inside the container.
+
 OpenCode uses Bun/OpenTUI native libraries that are unpacked into `/tmp` and loaded at runtime. For that reason `/tmp` is still an isolated tmpfs, but it is mounted with `exec`.
 
 ## Authentication Persistence
@@ -123,6 +135,7 @@ the wrapper mounts:
 ~/src/my-project       -> /workspace
 agent-coder-claude     -> /home/coder
 tmpfs                  -> /tmp
+${NODE_EXTRA_CA_CERTS}  -> /etc/ssl/certs/agent-coder-extra-ca.crt (when set)
 ```
 
 It does not mount:
