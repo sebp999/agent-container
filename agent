@@ -5,6 +5,7 @@ IMAGE="${AGENT_CODER_IMAGE:-agent-coder}"
 DOCKER="${AGENT_CODER_DOCKER:-docker}"
 WORKSPACE="/workspace"
 CONTAINER_HOME="/home/coder"
+CONTAINER_EXTRA_CA="/etc/ssl/certs/agent-coder-extra-ca.crt"
 
 usage() {
   cat <<'EOF'
@@ -28,6 +29,7 @@ Environment:
   AGENT_CODER_IMAGE       Docker image to run. Default: agent-coder
   AGENT_CODER_DOCKER      Docker-compatible CLI to use. Default: docker
   AGENT_CODER_ENV         Comma or space separated host env vars to forward.
+  NODE_EXTRA_CA_CERTS     Host CA bundle to mount read-only for Node-based agents.
 
 Example:
   AGENT_CODER_ENV=ANTHROPIC_API_KEY,OPENAI_API_KEY agent claude .
@@ -64,6 +66,18 @@ resolve_dir() {
   [[ -d "$input" ]] || die "path is not a directory: $input"
 
   (cd "$input" && pwd -P)
+}
+
+resolve_file() {
+  local input="$1"
+  local parent basename
+
+  [[ -f "$input" ]] || die "file does not exist or is not a regular file: $input"
+  [[ -r "$input" ]] || die "file is not readable: $input"
+
+  parent="$(cd "$(dirname "$input")" && pwd -P)"
+  basename="$(basename "$input")"
+  printf '%s/%s' "$parent" "$basename"
 }
 
 append_forwarded_env() {
@@ -130,6 +144,10 @@ else
 fi
 
 source_abs="$(resolve_dir "$source_dir")"
+extra_ca_abs=""
+if [[ -n "${NODE_EXTRA_CA_CERTS:-}" ]]; then
+  extra_ca_abs="$(resolve_file "$NODE_EXTRA_CA_CERTS")"
+fi
 validate_forwarded_env
 
 command -v "$DOCKER" >/dev/null 2>&1 || die "Docker-compatible CLI not found: $DOCKER"
@@ -167,6 +185,13 @@ if [[ -n "${COLORTERM:-}" ]]; then
 fi
 
 append_forwarded_env
+
+if [[ -n "$extra_ca_abs" ]]; then
+  docker_args+=(
+    --mount "type=bind,source=${extra_ca_abs},target=${CONTAINER_EXTRA_CA},readonly"
+    --env "NODE_EXTRA_CA_CERTS=${CONTAINER_EXTRA_CA}"
+  )
+fi
 
 docker_args+=(
   "$IMAGE"
