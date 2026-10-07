@@ -6,6 +6,7 @@ DOCKER="${AGENT_CODER_DOCKER:-docker}"
 WORKSPACE="/workspace"
 CONTAINER_HOME="/home/coder"
 CONTAINER_EXTRA_CA="/etc/ssl/certs/agent-coder-extra-ca.crt"
+CONTAINER_OPENCODE_CONFIG="${CONTAINER_HOME}/.config/opencode/opencode.json"
 
 usage() {
   cat <<'EOF'
@@ -145,8 +146,12 @@ fi
 
 source_abs="$(resolve_dir "$source_dir")"
 extra_ca_abs=""
+opencode_config_abs=""
 if [[ -n "${NODE_EXTRA_CA_CERTS:-}" ]]; then
   extra_ca_abs="$(resolve_file "$NODE_EXTRA_CA_CERTS")"
+fi
+if [[ "$agent_name" == "opencode" ]]; then
+  opencode_config_abs="$(resolve_file "${HOME}/.config/opencode/opencode.json")"
 fi
 validate_forwarded_env
 
@@ -190,6 +195,12 @@ if [[ -n "$extra_ca_abs" ]]; then
   docker_args+=(
     --mount "type=bind,source=${extra_ca_abs},target=${CONTAINER_EXTRA_CA},readonly"
     --env "NODE_EXTRA_CA_CERTS=${CONTAINER_EXTRA_CA}"
+  )
+fi
+
+if [[ -n "$opencode_config_abs" ]]; then
+  docker_args+=(
+    --mount "type=bind,source=${opencode_config_abs},target=${CONTAINER_OPENCODE_CONFIG},readonly"
   )
 fi
 
