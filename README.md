@@ -99,6 +99,11 @@ separately because the host path does not exist inside the container.
 
 OpenCode uses Bun/OpenTUI native libraries that are unpacked into `/tmp` and loaded at runtime. For that reason `/tmp` is still an isolated tmpfs, but it is mounted with `exec`.
 
+When launching OpenCode, the wrapper requires the host configuration file at
+`~/.config/opencode/opencode.json` and mounts that single file read-only at the
+same location under the container user's home. The rest of the host's
+`~/.config` directory remains unavailable to the container.
+
 ## Authentication Persistence
 
 The host home directory is never mounted. Instead, each agent gets a dedicated Docker named volume mounted as the container user's home directory:
@@ -136,6 +141,7 @@ the wrapper mounts:
 agent-coder-claude     -> /home/coder
 tmpfs                  -> /tmp
 ${NODE_EXTRA_CA_CERTS}  -> /etc/ssl/certs/agent-coder-extra-ca.crt (when set)
+~/.config/opencode/opencode.json -> /home/coder/.config/opencode/opencode.json (OpenCode only, read-only)
 ```
 
 It does not mount:
@@ -144,7 +150,7 @@ It does not mount:
 $HOME
 ~/.ssh
 ~/.aws
-~/.config
+~/.config (except the single OpenCode config file for OpenCode runs)
 /var/run/docker.sock
 Docker configuration
 other source directories
