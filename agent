@@ -7,6 +7,8 @@ WORKSPACE="/workspace"
 CONTAINER_HOME="/home/coder"
 CONTAINER_EXTRA_CA="/etc/ssl/certs/agent-coder-extra-ca.crt"
 CONTAINER_OPENCODE_CONFIG="${CONTAINER_HOME}/.config/opencode/opencode.json"
+OPENCHAMBER_CONTAINER_PORT="${AGENT_CODER_OPENCHAMBER_CONTAINER_PORT:-3000}"
+OPENCHAMBER_HOST_PORT="${AGENT_CODER_OPENCHAMBER_HOST_PORT:-3000}"
 
 usage() {
   cat <<'EOF'
@@ -18,11 +20,13 @@ Agents:
   claude
   codex
   opencode
+  openchamber
 
 Examples:
   agent claude .
   agent codex ~/src/project
   agent opencode ../another-project
+  agent openchamber . --ui-password be-creative-here
   agent claude . --resume
   agent codex --help
 
@@ -30,6 +34,10 @@ Environment:
   AGENT_CODER_IMAGE       Docker image to run. Default: agent-coder
   AGENT_CODER_DOCKER      Docker-compatible CLI to use. Default: docker
   AGENT_CODER_ENV         Comma or space separated host env vars to forward.
+  AGENT_CODER_OPENCHAMBER_HOST_PORT
+                          Host localhost port for OpenChamber. Default: 3000
+  AGENT_CODER_OPENCHAMBER_CONTAINER_PORT
+                          Container port for OpenChamber. Default: 3000
   NODE_EXTRA_CA_CERTS     Host CA bundle to mount read-only for Node-based agents.
 
 Example:
@@ -47,6 +55,7 @@ agent_command() {
     claude) printf 'claude' ;;
     codex) printf 'codex' ;;
     opencode) printf 'opencode' ;;
+    openchamber) printf 'openchamber' ;;
     *) return 1 ;;
   esac
 }
@@ -56,8 +65,17 @@ volume_name() {
     claude) printf 'agent-coder-claude' ;;
     codex) printf 'agent-coder-codex' ;;
     opencode) printf 'agent-coder-opencode' ;;
+    openchamber) printf 'agent-coder-openchamber' ;;
     *) return 1 ;;
   esac
+}
+
+validate_port() {
+  local name="$1"
+  local value="$2"
+
+  [[ "$value" =~ ^[0-9]+$ ]] || die "$name must be a numeric TCP port: $value"
+  (( value >= 1 && value <= 65535 )) || die "$name must be between 1 and 65535: $value"
 }
 
 resolve_dir() {
@@ -153,6 +171,10 @@ fi
 if [[ "$agent_name" == "opencode" ]]; then
   opencode_config_abs="$(resolve_file "${HOME}/.config/opencode/opencode.json")"
 fi
+if [[ "$agent_name" == "openchamber" ]]; then
+  validate_port AGENT_CODER_OPENCHAMBER_CONTAINER_PORT "$OPENCHAMBER_CONTAINER_PORT"
+  validate_port AGENT_CODER_OPENCHAMBER_HOST_PORT "$OPENCHAMBER_HOST_PORT"
+fi
 validate_forwarded_env
 
 command -v "$DOCKER" >/dev/null 2>&1 || die "Docker-compatible CLI not found: $DOCKER"
@@ -185,6 +207,14 @@ docker_args+=(
   --hostname agent-coder
 )
 
+if [[ "$agent_name" == "openchamber" ]]; then
+  docker_args+=(
+    --publish "127.0.0.1:${OPENCHAMBER_HOST_PORT}:${OPENCHAMBER_CONTAINER_PORT}"
+    --env "OPENCHAMBER_HOST=0.0.0.0"
+    --env "OPENCODE_BINARY=/usr/local/bin/opencode"
+  )
+fi
+
 if [[ -n "${COLORTERM:-}" ]]; then
   docker_args+=(--env "COLORTERM=${COLORTERM}")
 fi
@@ -208,5 +238,12 @@ docker_args+=(
   "$IMAGE"
   "$command_inside"
 )
+
+if [[ "$agent_name" == "openchamber" ]]; then
+  docker_args+=(
+    --port "$OPENCHAMBER_CONTAINER_PORT"
+    --foreground
+  )
+fi
 
 exec "$DOCKER" "${docker_args[@]}" "$@"
