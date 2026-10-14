@@ -42,6 +42,7 @@ From any source checkout:
 ./agent claude .
 ./agent codex .
 ./agent opencode .
+./agent openchamber . --ui-password be-creative-here
 ```
 
 If you omit the directory, the current directory is used:
@@ -79,6 +80,7 @@ Forward only named variables with `AGENT_CODER_ENV`, using commas or spaces:
 AGENT_CODER_ENV=ANTHROPIC_API_KEY ./agent claude .
 AGENT_CODER_ENV=OPENAI_API_KEY ./agent codex .
 AGENT_CODER_ENV=ANTHROPIC_API_KEY,OPENAI_API_KEY ./agent opencode .
+AGENT_CODER_ENV=ANTHROPIC_API_KEY,OPENAI_API_KEY ./agent openchamber . --ui-password be-creative-here
 ```
 
 Variables listed in `AGENT_CODER_ENV` are passed with Docker's `--env NAME` form, so the value comes from the host environment at launch time. Unset variables are skipped with a warning.
@@ -104,6 +106,30 @@ When launching OpenCode, the wrapper requires the host configuration file at
 same location under the container user's home. The rest of the host's
 `~/.config` directory remains unavailable to the container.
 
+OpenChamber runs the web UI inside the same container image and uses the
+container's installed OpenCode binary. The wrapper binds OpenChamber to
+`0.0.0.0` inside the container but publishes it only on host localhost:
+
+```bash
+./agent openchamber ~/src/my-project --ui-password be-creative-here
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3000
+```
+
+Use another host port if 3000 is busy:
+
+```bash
+AGENT_CODER_OPENCHAMBER_HOST_PORT=3001 ./agent openchamber . --ui-password be-creative-here
+```
+
+OpenChamber gets a separate persisted home volume. Configure providers in the
+OpenChamber UI, or forward only the API key variables you want the container to
+see with `AGENT_CODER_ENV`.
+
 ## Authentication Persistence
 
 The host home directory is never mounted. Instead, each agent gets a dedicated Docker named volume mounted as the container user's home directory:
@@ -112,6 +138,7 @@ The host home directory is never mounted. Instead, each agent gets a dedicated D
 agent-coder-claude   -> /home/coder
 agent-coder-codex    -> /home/coder
 agent-coder-opencode -> /home/coder
+agent-coder-openchamber -> /home/coder
 ```
 
 This lets browser/device-code login flows and local agent settings persist across container runs without exposing `~/.ssh`, cloud credentials, or other host configuration.
@@ -124,6 +151,7 @@ To remove persisted authentication and agent state:
 docker volume rm agent-coder-claude
 docker volume rm agent-coder-codex
 docker volume rm agent-coder-opencode
+docker volume rm agent-coder-openchamber
 ```
 
 ## Mounts
@@ -142,6 +170,7 @@ agent-coder-claude     -> /home/coder
 tmpfs                  -> /tmp
 ${NODE_EXTRA_CA_CERTS}  -> /etc/ssl/certs/agent-coder-extra-ca.crt (when set)
 ~/.config/opencode/opencode.json -> /home/coder/.config/opencode/opencode.json (OpenCode only, read-only)
+127.0.0.1:3000          -> OpenChamber web UI port (OpenChamber only)
 ```
 
 It does not mount:

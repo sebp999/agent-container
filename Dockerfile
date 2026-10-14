@@ -55,6 +55,7 @@ RUN set -eux; \
 
 RUN npm install -g \
         @anthropic-ai/claude-code \
+        @openchamber/web \
         @openai/codex \
         @opencode/cli; \
     npm cache clean --force
